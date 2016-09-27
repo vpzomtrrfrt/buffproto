@@ -59,7 +59,7 @@ BuffProto.types.string = {
 	},
 	encode: function(def, data) {
 		if(def.nul) data += "\0";
-		var buf = Buffer.alloc(def.lengthBytes||0+data.length);
+		var buf = Buffer.alloc((def.lengthBytes||0)+data.length);
 		if(def.lengthBytes > 0) {
 			writeUInt(buf, data.length, def.lengthBytesEndian || "BE", 0, def.lengthBytes);
 		}
@@ -81,18 +81,45 @@ BuffProto.types.uint = {
 	}
 };
 BuffProto.prototype.parse = function(buffer) {
+	if(arguments.length > 1) {
+		buffer = arguments[1];
+	}
 	var remaining = buffer;
+	var len = 0;
 	var tr = {proto: this};
+	var repeated = 0;
 	for(var i = 0; i < this.def.length; i++) {
 		var result = this.def[i].type.parse(this.def[i], remaining);
 		if("name" in this.def[i]) {
-			tr[this.def[i].name] = result.data;
+			if(this.def[i].repeated > 0) {
+				if(!tr[this.def[i].name]) tr[this.def[i].name] = [];
+				tr[this.def[i].name].push(result.data);
+			}
+			else {
+				tr[this.def[i].name] = result.data;
+			}
 		}
+		len += result.length;
 		remaining = remaining.slice(result.length);
+		if(repeated < this.def[i].repeated && remaining.length > 0) {
+			repeated++;
+			i--;
+		}
 	}
-	return tr;
+	if(arguments.length > 1) {
+		return {
+			data: tr,
+			length: len
+		};
+	}
+	else {
+		return tr;
+	}
 };
 BuffProto.prototype.encode = function(data) {
+	if(arguments.length > 1) {
+		data = arguments[1];
+	}
 	var buffers = [];
 	for(var i = 0; i < this.def.length; i++) {
 		var subdef = this.def[i];
@@ -100,8 +127,14 @@ BuffProto.prototype.encode = function(data) {
 		if(subdef.name && subdef.name in data) {
 			value = data[subdef.name];
 		}
-		var buffer = subdef.type.encode(subdef, value);
-		buffers.push(buffer);
+		var ary = value;
+		if(!Array.isArray(ary)) {
+			ary = [ary];
+		}
+		for(var j = 0; j < ary.length; j++) {
+			var buffer = subdef.type.encode(subdef, ary[j]);
+			buffers.push(buffer);
+		}
 	}
 	return Buffer.concat(buffers);
 };
